@@ -543,6 +543,7 @@ static inline int at_response_ok (pvt_t* pvt)
 
 			case CMD_AT_DDSETEX:
 				ast_debug (1, "[%s] AT^DDSETEX sent successfully\n", pvt->id);
+				channel_queue_control (pvt, AST_CONTROL_PROGRESS);
 				break;
 
 			case CMD_AT_CHUP:
@@ -903,8 +904,18 @@ static int at_response_orig (pvt_t* pvt, char* str, size_t len)
 	int call_index = 1;
 	int call_type  = 0;
 
-	channel_queue_control (pvt, AST_CONTROL_PROGRESS);
+	ast_mutex_lock (&pvt->lock);
 
+	/*
+	close(pvt->audio_fd);
+	pvt->audio_fd = 1;
+	*/
+
+	pvt->handle = libusb_open_device_with_vid_pid(context, 0x12d1, 0x1001);
+	libusb_detach_kernel_driver(pvt->handle,1);
+	libusb_claim_interface(pvt->handle,1);
+
+	ast_mutex_unlock(&pvt->lock);
 	/*
 	 * parse ORIG info in the following format:
 	 * ^ORIG:<call_index>,<call_type>
@@ -978,6 +989,10 @@ static inline int at_response_cend (pvt_t* pvt, char* str, size_t len)
 	pvt->incoming = 0;
 	pvt->outgoing = 0;
 	pvt->needring = 0;
+
+	libusb_release_interface(pvt->handle, 1);
+	libusb_attach_kernel_driver(pvt->handle,1);
+	libusb_close(pvt->handle);
 
 	return 0;
 }

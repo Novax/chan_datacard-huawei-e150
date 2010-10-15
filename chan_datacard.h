@@ -7,6 +7,8 @@
    Dmitry Vagin <dmitry2004@yandex.ru>
 */
 
+#include <libusb-1.0/libusb.h>
+
 #ifndef MIN
 #define MIN(a,b) (((a) < (b)) ? (a) : (b))
 #endif
@@ -118,8 +120,13 @@ typedef struct pvt_t
 	AST_LIST_HEAD_NOLOCK (at_queue, at_queue_t) at_queue;	/* queue for response we are expecting */
 	pthread_t		monitor_thread;			/* monitor thread handle */
 
-	int			audio_fd;			/* audio descriptor */
+	int			audio_fd_read;			 /* audio descriptor */
+	int			audio_fd_write;
 	int			data_fd;			/* data  descriptor */
+
+	libusb_device_handle* handle;	/* libusb device handle*/
+
+
 
 	struct ast_channel*	owner;				/* Channel we belong to, possibly NULL */
 	struct ast_dsp*		dsp;
@@ -268,6 +275,7 @@ static struct ast_jb_conf jbconf_global;
 AST_MUTEX_DEFINE_STATIC (round_robin_mtx);
 static pvt_t*	round_robin[256];
 static char	silence_frame[FRAME_SIZE];
+static libusb_context* context;
 
 
 static int			opentty			(char*);
@@ -378,7 +386,7 @@ static inline void		at_fifo_queue_rem	(pvt_t*);
 static inline void		at_fifo_queue_flush	(pvt_t*);
 static inline at_queue_t*	at_fifo_queue_head	(pvt_t*);
 
-
+void usb_callback(struct libusb_transfer * t);
 
 /* CLI */
 

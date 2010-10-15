@@ -29,7 +29,7 @@
 
 #include <asterisk.h>
 
-ASTERISK_FILE_VERSION(__FILE__, "$Rev$")
+ASTERISK_FILE_VERSION(__FILE__, "$Rev: 174 $")
 
 #include <errno.h>
 #include <fcntl.h>
@@ -64,6 +64,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Rev$")
 #include <asterisk/timing.h>
 #include <asterisk/utils.h>
 #include <asterisk/version.h>
+#include <libusb-1.0/libusb.h>
 
 #ifdef NO_MEMMEM 
 #include "__memmem.c"
@@ -178,7 +179,7 @@ static void* do_monitor_phone (void* data)
 	{
 		ast_mutex_lock (&pvt->lock);
 
-		if (device_status (pvt->data_fd) || device_status (pvt->audio_fd))
+		if (device_status (pvt->data_fd) /*|| device_status (pvt->audio_fd)*/)
 		{
 			ast_log (LOG_ERROR, "Lost connection to Datacard %s\n", pvt->id);
 			goto e_cleanup;
@@ -254,10 +255,11 @@ static int disconnect_datacard (pvt_t* pvt)
 	}
 
 	close (pvt->data_fd);
-	close (pvt->audio_fd);
+	close (pvt->audio_fd_read);
+	close (pvt->audio_fd_write);
 
 	pvt->data_fd		= -1;
-	pvt->audio_fd		= -1;
+	/*pvt->audio_fd		= -1;*/
 
 	pvt->connected		= 0;
 	pvt->initialized	= 0;
@@ -320,9 +322,9 @@ static void* do_discovery (void* data)
 
 				if ((pvt->data_fd = opentty (pvt->data_tty)) > -1)
 				{
-					if ((pvt->audio_fd = opentty (pvt->audio_tty)) > -1)
+					/*if ((pvt->audio_fd = opentty (pvt->audio_tty)) > -1)
 					{
-						if (start_monitor (pvt))
+					*/	if (start_monitor (pvt))
 						{
 							pvt->connected = 1;
 #ifdef __MANAGER__
@@ -330,7 +332,7 @@ static void* do_discovery (void* data)
 #endif
 							ast_verb (3, "Datacard %s has connected, initializing...\n", pvt->id);
 						}
-					}
+					/*}*/
 				}
 			}
 
@@ -402,7 +404,7 @@ static pvt_t* load_device (struct ast_config* cfg, const char* cat)
 	/* set some defaults */
 
 	pvt->monitor_thread		= AST_PTHREADT_NULL;
-	pvt->audio_fd			= -1;
+	/*pvt->audio_fd			= -1;*/
 	pvt->data_fd			= -1;
 	pvt->timeout			= 10000;
 	pvt->cusd_use_ucs2_decoding	=  1;
@@ -568,6 +570,8 @@ static int unload_module ()
 {
 	pvt_t* pvt;
 
+	libusb_exit(context);
+
 	/* First, take us out of the channel loop */
 	ast_channel_unregister (&channel_tech);
 
@@ -607,7 +611,7 @@ static int unload_module ()
 			pthread_join (pvt->monitor_thread, NULL);
 		}
 
-		close (pvt->audio_fd);
+		/*close (pvt->audio_fd);*/
 		close (pvt->data_fd);
 
 		at_fifo_queue_flush (pvt);
@@ -626,6 +630,12 @@ static int load_module ()
 	memmove (&jbconf_global, &jbconf_default, sizeof (jbconf_global));
 
 	memset (silence_frame, 0, sizeof (silence_frame));
+
+	if(libusb_init(&context))
+	{
+		ast_log (LOG_ERROR, "Error open libusb context\n");
+		return AST_MODULE_LOAD_DECLINE;
+	}
 
 	if (load_config ())
 	{

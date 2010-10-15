@@ -10,6 +10,7 @@
 static struct ast_channel* channel_new (pvt_t* pvt, int state, char* cid_num)
 {
 	struct ast_channel* channel;
+	int pipefd[2];
 
 	pvt->answered = 0;
 
@@ -39,16 +40,28 @@ static struct ast_channel* channel_new (pvt_t* pvt, int state, char* cid_num)
 	ast_string_field_set (channel, language, "en");
 	ast_jb_configure (channel, &jbconf_global);
 
+	pipe(pipefd);
+
+	pvt->audio_fd_read = pipefd[0];
+	pvt->audio_fd_write = pipefd[1];
+
+	ast_channel_set_fd (channel, 0, pvt->audio_fd_read);
+
+
+	/*
 	if (pvt->audio_fd != -1)
 	{
 		ast_channel_set_fd (channel, 0, pvt->audio_fd);
+
 
 		if ((pvt->a_timer = ast_timer_open ()))
 		{
 			ast_channel_set_fd (channel, 1, ast_timer_fd (pvt->a_timer));
 			rb_init (&pvt->a_write_rb, pvt->a_write_buf, sizeof (pvt->a_write_buf));
 		}
+
 	}
+	*/
 
 	pvt->owner = channel;
 
@@ -535,17 +548,20 @@ static struct ast_frame* channel_read (struct ast_channel* channel)
 {
 	pvt_t*			pvt = channel->tech_pvt;
 	struct ast_frame*	f = &ast_null_frame;
-	ssize_t			res;
+	int			res = 0;
+
+	ast_debug (7, "[%s] Enter read\n", pvt->id);
 
 	while (ast_mutex_trylock (&pvt->lock))
 	{
 		CHANNEL_DEADLOCK_AVOIDANCE (channel);
 	}
-
+	/*
 	if (!pvt->owner || pvt->audio_fd == -1)
 	{
 		goto e_return;
 	}
+
 
 	if (pvt->a_timer && channel->fdno == 1)
 	{
@@ -555,6 +571,7 @@ static struct ast_frame* channel_read (struct ast_channel* channel)
 	}
 	else
 	{
+	*/
 		memset (&pvt->a_read_frame, 0, sizeof (struct ast_frame));
 
 		pvt->a_read_frame.frametype	= AST_FRAME_VOICE;
@@ -566,14 +583,12 @@ static struct ast_frame* channel_read (struct ast_channel* channel)
 		pvt->a_read_frame.data.ptr	= pvt->a_read_buf + AST_FRIENDLY_OFFSET;
 		pvt->a_read_frame.offset	= AST_FRIENDLY_OFFSET;
 
-		res = read (pvt->audio_fd, pvt->a_read_frame.data.ptr, FRAME_SIZE);
+
+
+		res = read (pvt->audio_fd_read, pvt->a_read_frame.data.ptr, FRAME_SIZE);
 		if (res <= 0)
 		{
-			if (errno != EAGAIN && errno != EINTR)
-			{
-				ast_debug (1, "[%s] Read error %d, going to wait for new connection\n", pvt->id, errno);
-			}
-
+			ast_debug (1, "[%s] Read error\n", pvt->id);
 			goto e_return;
 		}
 
@@ -608,7 +623,7 @@ static struct ast_frame* channel_read (struct ast_channel* channel)
 				ast_debug (1, "[%s] Volume could not be adjusted!\n", pvt->id);
 			}
 		}
-	}
+	//}
 
 e_return:
 	ast_mutex_unlock (&pvt->lock);
@@ -621,7 +636,7 @@ static inline void channel_timing_write (pvt_t* pvt)
 	size_t		used;
 	int		iovcnt;
 	struct iovec	iov[3];
-	ssize_t		res;
+	int		res;
 	size_t		count;
 
 	used = rb_used (&pvt->a_write_rb);
@@ -652,6 +667,7 @@ static inline void channel_timing_write (pvt_t* pvt)
 	}
 
 	count = 0;
+	/*
 	while ((res = writev (pvt->audio_fd, iov, iovcnt)) < 0 && (errno == EINTR || errno == EAGAIN))
 	{
 		if (count++ > 10)
@@ -661,7 +677,7 @@ static inline void channel_timing_write (pvt_t* pvt)
 		}
 		usleep (1);
 	}
-
+	*/
 	if (res < 0 || res != FRAME_SIZE)
 	{
 		ast_debug (1, "[%s] Write error!\n", pvt->id);
@@ -671,8 +687,9 @@ static inline void channel_timing_write (pvt_t* pvt)
 static int channel_write (struct ast_channel* channel, struct ast_frame* f)
 {
 	pvt_t*	pvt = channel->tech_pvt;
-	ssize_t	res;
+	int	res;
 	size_t	count;
+	void * buff;
 
 	#if ASTERISK_VERSION_NUM >= 10800
 	if (f->frametype != AST_FRAME_VOICE || f->subclass.codec != AST_FORMAT_SLINEAR)
@@ -688,12 +705,12 @@ static int channel_write (struct ast_channel* channel, struct ast_frame* f)
 		CHANNEL_DEADLOCK_AVOIDANCE (channel);
 	}
 
-	if (pvt->audio_fd == -1)
-	{
-		ast_debug (1, "[%s] audio_fd not ready\n", pvt->id);
-	}
-	else
-	{
+//	if (pvt->audio_fd == -1)
+//	{
+//		ast_debug (1, "[%s] audio_fd not ready\n", pvt->id);
+//	}
+//	else
+//	{
 //		if (f->datalen != 320)
 		{
 			ast_debug (7, "[%s] Frame: samples = %d, data lenght = %d byte\n", pvt->id, f->samples, f->datalen);
@@ -735,6 +752,7 @@ static int channel_write (struct ast_channel* channel, struct ast_frame* f)
 				iovcnt		= 2;
 			}
 
+			/*
 			count = 0;
 			while ((res = writev (pvt->audio_fd, iov, iovcnt)) < 0 && (errno == EINTR || errno == EAGAIN))
 			{
@@ -750,14 +768,41 @@ static int channel_write (struct ast_channel* channel, struct ast_frame* f)
 			{
 				ast_debug (1, "[%s] Write error!\n", pvt->id);
 			}
+			*/
+			struct libusb_transfer * transfer;
+
+			transfer =  libusb_alloc_transfer(0);
+
+			libusb_fill_bulk_transfer(transfer, pvt->handle, (2 | LIBUSB_ENDPOINT_OUT), f->data.ptr, f->datalen, usb_callback, NULL, 0);
+			libusb_submit_transfer(transfer);
+
+			transfer =  libusb_alloc_transfer(0);
+			libusb_fill_bulk_transfer(transfer, pvt->handle, (2 | LIBUSB_ENDPOINT_OUT), NULL, 0, usb_callback, NULL, 0);
+			libusb_submit_transfer(transfer);
+
+			buff = calloc(FRAME_SIZE,1);
+
+			libusb_bulk_transfer(pvt->handle, (3 | LIBUSB_ENDPOINT_IN), buff, FRAME_SIZE, &res, 15);
+
+			ast_debug (7, "[%s] Readed %d byte\n", pvt->id, res);
+
+			write(pvt->audio_fd_write, buff, res);
+
 		}
-	}
+	//}
 
 e_return:
 	ast_mutex_unlock (&pvt->lock);
 
 	return 0;
 }
+
+void usb_callback(struct libusb_transfer * t)
+{
+	libusb_free_transfer(t);
+	return;
+}
+
 
 static int channel_fixup (struct ast_channel* oldchannel, struct ast_channel* newchannel)
 {
