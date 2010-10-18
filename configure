@@ -11,7 +11,7 @@ FreeBSD*)
 	CFLAGS="-O2 -DICONV_CONST=\"const\" -D__DEBUG__ -D__MANAGER__ -D__APP__"
 
 	LIBDIR="-L/usr/local/lib"
-	LIBS="-liconv"
+	LIBS="-liconv -lusb-1.0"
 
 	SOLINK="-shared -Xlinker -x"
 ;;    
@@ -22,7 +22,7 @@ Linux*)
 	CFLAGS="-O2 -DICONV_CONST=\"\" -D__DEBUG__ -D__MANAGER__ -D__APP__"
 
 	LIBDIR=""
-	LIBS=""
+	LIBS="-lusb-1.0"
 
 	SOLINK="-shared -Xlinker -x"
 ;;
@@ -33,7 +33,7 @@ Darwin*)
 	CFLAGS="-O2 -DNO_MEMMEM -DICONV_CONST=\"const\" -D__DEBUG__ -D__MANAGER__ -D__APP__"
 
 	LIBDIR="-L/opt/local/lib"
-	LIBS="-liconv"
+	LIBS="-liconv -lusb-1.0"
 	
 	SOLINK="-dynamic -bundle -Xlinker -macosx_version_min -Xlinker 10.4 -Xlinker -undefined -Xlinker dynamic_lookup -force_flat_namespace"
 	[ `/usr/bin/sw_vers -productVersion | cut -c1-4` == "10.6" ] && SOLINK=${SOLINK}" /usr/lib/bundle1.o"
